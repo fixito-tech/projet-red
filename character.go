@@ -42,14 +42,14 @@ func displayInfo(name string, class string ) string{
 
 }
 
-func inventory(){
-	var invent [10]int 
-	for i:=0 , range < len(invent); i++{
-		if invent[i] != 0{
-			invent[i+1]=drop()
-		}
-		else{
-			invent[i]=drop()
+func inventory() {
+
+	var invent [10]int
+
+	for i := 0; i < len(invent); i++ {
+		if invent[i] == 0 {
+			invent[i] = drop()
+			break
 		}
 	}
 }
