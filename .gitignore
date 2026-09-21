@@ -1,0 +1,8 @@
+# Binaires compilés
+src/projet-red
+src/projet-red.exe
+src/*.exe
+
+# Fichiers Go divers
+*.test
+*.out
