@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"log"
 	"path/filepath"
+	"strconv"
+	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -57,6 +59,7 @@ type State int
 
 const (
 	StateMenu State = iota
+	StateCreate // saisie du nom puis choix de la classe
 	StatePlay
 )
 
@@ -65,7 +68,6 @@ type Game struct {
 
 	// menu
 	menuBg    *ebiten.Image
-	menuItems []string
 	menuIndex int
 
 	// scène + joueur
@@ -83,6 +85,17 @@ type Game struct {
 
 	showDebug bool
 	textCache map[string]*ebiten.Image
+
+	// personnage et interface
+	hero       *Character
+	invOpen    bool
+	invSel     int
+	msg        string
+	msgTimer   int
+	createStep int    // 0 = nom, 1 = classe
+	nameBuf    []rune // nom en cours de saisie
+	classSel   int
+	uiTick     int
 }
 
 // ---------------------------------------------------------------
@@ -95,36 +108,204 @@ func (g *Game) Update() error {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
 
+	g.uiTick++
+	if g.msgTimer > 0 {
+		g.msgTimer--
+		if g.msgTimer == 0 {
+			g.msg = ""
+		}
+	}
+
 	switch g.state {
 	case StateMenu:
 		return g.updateMenu()
+	case StateCreate:
+		return g.updateCreate()
 	case StatePlay:
 		return g.updatePlay()
 	}
 	return nil
 }
 
+// menuEntries : "Continuer" n'apparaît qu'une fois un personnage créé.
+func (g *Game) menuEntries() []string {
+	if g.hero != nil {
+		return []string{"Continuer", "Nouvelle partie", "Quitter"}
+	}
+	return []string{"Jouer", "Quitter"}
+}
+
+func confirmPressed() bool {
+	return !ebiten.IsKeyPressed(ebiten.KeyAlt) &&
+		(inpututil.IsKeyJustPressed(ebiten.KeyEnter) ||
+			inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter))
+}
+
 func (g *Game) updateMenu() error {
+	items := g.menuEntries()
+	if g.menuIndex >= len(items) {
+		g.menuIndex = 0
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) || inpututil.IsKeyJustPressed(ebiten.KeyS) {
-		g.menuIndex = (g.menuIndex + 1) % len(g.menuItems)
+		g.menuIndex = (g.menuIndex + 1) % len(items)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) || inpututil.IsKeyJustPressed(ebiten.KeyZ) || inpututil.IsKeyJustPressed(ebiten.KeyW) {
-		g.menuIndex = (g.menuIndex - 1 + len(g.menuItems)) % len(g.menuItems)
+		g.menuIndex = (g.menuIndex - 1 + len(items)) % len(items)
 	}
-	if !ebiten.IsKeyPressed(ebiten.KeyAlt) &&
-		(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace) ||
-			inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter)) {
-		switch g.menuIndex {
-		case 0: // Jouer
+	if confirmPressed() || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		switch items[g.menuIndex] {
+		case "Continuer":
 			g.state = StatePlay
-		case 1: // Quitter
+		case "Jouer", "Nouvelle partie":
+			g.state = StateCreate
+			g.createStep = 0
+			g.nameBuf = nil
+			g.classSel = 0
+		case "Quitter":
 			return ebiten.Termination
 		}
 	}
 	return nil
 }
 
+// updateCreate : écran de création du personnage (tâche 11).
+func (g *Game) updateCreate() error {
+	if g.createStep == 0 {
+		// saisie du nom : on ne garde que les lettres
+		for _, r := range ebiten.AppendInputChars(nil) {
+			if unicode.IsLetter(r) && len(g.nameBuf) < 14 {
+				g.nameBuf = append(g.nameBuf, r)
+			}
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(g.nameBuf) > 0 {
+			g.nameBuf = g.nameBuf[:len(g.nameBuf)-1]
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+			g.state = StateMenu
+		}
+		if confirmPressed() && FormatNom(string(g.nameBuf)) != "" {
+			g.createStep = 1
+		}
+		return nil
+	}
+
+	// choix de la classe
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) || inpututil.IsKeyJustPressed(ebiten.KeyQ) || inpututil.IsKeyJustPressed(ebiten.KeyA) {
+		g.classSel = (g.classSel - 1 + len(Classes)) % len(Classes)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) || inpututil.IsKeyJustPressed(ebiten.KeyD) {
+		g.classSel = (g.classSel + 1) % len(Classes)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.createStep = 0
+	}
+	if confirmPressed() || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		g.hero = NewCharacter(FormatNom(string(g.nameBuf)), Classes[g.classSel])
+		g.startNewGame()
+		g.state = StatePlay
+	}
+	return nil
+}
+
+// startNewGame remet le joueur dans la scène de départ.
+func (g *Game) startNewGame() {
+	if sc, err := LoadScene(startScene); err == nil {
+		g.scene = sc
+	}
+	if g.scene.Start[0] >= 0 {
+		g.px = float64(g.scene.Start[1] * TileSize)
+		g.py = float64(g.scene.Start[0] * TileSize)
+	} else {
+		g.px = float64(GridW / 2 * TileSize)
+		g.py = float64(GridH / 2 * TileSize)
+	}
+	g.dir, g.frame, g.tick = DirDown, 0, 0
+	g.invOpen, g.invSel = false, 0
+}
+
+func (g *Game) toast(m string) {
+	g.msg = m
+	g.msgTimer = 120 // 2 secondes
+}
+
+// updateInventory : navigation dans la grille quand l'inventaire est ouvert.
+func (g *Game) updateInventory() {
+	h := g.hero
+	cols, _, _ := invLayout(h.Capacite)
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) || inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.invOpen = false
+		return
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) || inpututil.IsKeyJustPressed(ebiten.KeyD) {
+		g.invSel++
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) || inpututil.IsKeyJustPressed(ebiten.KeyQ) || inpututil.IsKeyJustPressed(ebiten.KeyA) {
+		g.invSel--
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) || inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		g.invSel += cols
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) || inpututil.IsKeyJustPressed(ebiten.KeyZ) || inpututil.IsKeyJustPressed(ebiten.KeyW) {
+		g.invSel -= cols
+	}
+	if g.invSel < 0 {
+		g.invSel = 0
+	}
+	if g.invSel >= h.Capacite {
+		g.invSel = h.Capacite - 1
+	}
+	if confirmPressed() || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		if m := h.UseItem(g.invSel); m != "" {
+			g.toast(m)
+		}
+	}
+}
+
+// Touches de test pour la démo (à retirer ou garder pour l'oral).
+var testItems = []string{"Morceau de moquette", "Tuyau rouillé", "Néon cassé", "Barre de fer", "Almond Water"}
+
+func (g *Game) updateDebugKeys() {
+	h := g.hero
+	if inpututil.IsKeyJustPressed(ebiten.KeyF2) { // ajoute un objet
+		item := testItems[g.uiTick%len(testItems)]
+		if h.AddItem(item) {
+			g.toast("Ramassé : " + item)
+		} else {
+			g.toast("Inventaire plein !")
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF3) { // prend des dégâts
+		h.PV -= 15
+		if h.PV < 0 {
+			h.PV = 0
+		}
+		h.Energie -= 10
+		if h.Energie < 0 {
+			h.Energie = 0
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF4) { // agrandit l'inventaire
+		if h.UpgradeInventory() {
+			g.toast("Inventaire agrandi : " + strconv.Itoa(h.Capacite) + " places")
+		} else {
+			g.toast("Amélioration maximale atteinte")
+		}
+	}
+}
+
 func (g *Game) updatePlay() error {
+	g.updateDebugKeys()
+
+	// Inventaire ouvert : il capte les touches et le joueur ne bouge plus.
+	if g.invOpen {
+		g.updateInventory()
+		g.frame, g.tick = 0, 0
+		return nil
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
+		g.invOpen = true
+		return nil
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.state = StateMenu
 		return nil
@@ -371,6 +552,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	switch g.state {
 	case StateMenu:
 		g.drawMenu(screen)
+	case StateCreate:
+		if g.createStep == 0 {
+			drawNameStep(screen, string(g.nameBuf), g.uiTick)
+		} else {
+			drawClassStep(screen, g)
+		}
 	case StatePlay:
 		g.drawPlay(screen)
 	}
@@ -383,19 +570,22 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 		op.GeoM.Scale(float64(ScreenW)/float64(w), float64(ScreenH)/float64(h))
 		screen.DrawImage(g.menuBg, op)
 	} else {
-		screen.Fill(color.RGBA{0xc9, 0xbb, 0x3d, 0xff})
-		g.drawText(screen, "THE BACKROOMS", 210, 110, 4)
+		drawCreateBackground(screen)
+		txt(screen, "THE BACKROOMS", ScreenW/2, 110, 44, true, colGold, alignCenter)
+		txt(screen, "Projet RED", ScreenW/2, 170, 14, false, colMuted, alignCenter)
 	}
 
-	for i, item := range g.menuItems {
-		y := 260.0 + float64(i)*50
-		label := "   " + item
+	for i, item := range g.menuEntries() {
+		y := 250.0 + float64(i)*46
+		c := color.Color(colMuted)
 		if i == g.menuIndex {
-			label = ">  " + item
+			c = colGold
+			txt(screen, "›", ScreenW/2-110, y-3, 26, true, colGold, alignCenter)
 		}
-		g.drawText(screen, label, 300, y, 3)
+		txt(screen, item, ScreenW/2, y, 22, true, c, alignCenter)
 	}
-	g.drawText(screen, "Fleches ou ZQSD  -  Entree pour valider", 250, 430, 1)
+	txt(screen, "Flèches ou ZQSD  ·  Entrée pour valider  ·  F11 : plein écran",
+		ScreenW/2, 440, 12, false, colMuted, alignCenter)
 }
 
 func (g *Game) drawPlay(screen *ebiten.Image) {
@@ -410,9 +600,17 @@ func (g *Game) drawPlay(screen *ebiten.Image) {
 	)
 	screen.DrawImage(g.playerFrame(), op)
 
+	// Le HUD passe APRÈS l'inventaire pour rester lisible par-dessus le voile :
+	// on voit la barre de vie remonter quand on boit une Almond Water.
+	if g.invOpen {
+		drawInventory(screen, g.hero, g.invSel)
+	}
+	drawHUD(screen, g.hero, !g.invOpen)
+	drawToast(screen, g.msg)
+
 	if g.showDebug {
-		g.drawText(screen, "scene: "+g.scene.Name, 8, 8, 1)
-		y := 24.0
+		g.drawText(screen, "scene: "+g.scene.Name, 8, 100, 1)
+		y := 116.0
 		for dir, target := range g.scene.Exits {
 			g.drawText(screen, dir+" -> "+target, 8, y, 1)
 			y += 14
@@ -494,7 +692,6 @@ func main() {
 	g := &Game{
 		state:     StateMenu,
 		scene:     scene,
-		menuItems: []string{"Jouer", "Quitter"},
 		textCache: make(map[string]*ebiten.Image),
 	}
 
