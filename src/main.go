@@ -24,6 +24,7 @@ func mainMenu(c *Character) {
 		fmt.Println("4. Le Bricoleur")
 		fmt.Println("5. Entraînement")
 		fmt.Println("6. Qui sont-ils ?")
+		fmt.Println("7. Quêtes")
 		fmt.Println("0. Quitter")
 
 		choice := readChoice("\nVotre choix : ")
@@ -41,6 +42,9 @@ func mainMenu(c *Character) {
 			trainingFight(c)
 		case 6:
 			whoAreThey()
+			pause()
+		case 7:
+			accessQuests(c)
 			pause()
 		case 0:
 			return

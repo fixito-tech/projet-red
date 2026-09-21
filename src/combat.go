@@ -153,6 +153,7 @@ func endTrainingFight(c *Character, m *Monster, victory bool) {
 	if victory {
 		fmt.Printf("\n%s est vaincu !\n", m.Name)
 		gainExperience(c, m.ExpReward)
+		updateQuests(c, "kill", 1)
 	} else {
 		fmt.Println("\nLe combat est terminé.")
 	}

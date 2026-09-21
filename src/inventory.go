@@ -111,6 +111,7 @@ func takePot(c *Character) {
 	}
 	fmt.Printf("%s boit une Eau d'Amande.\n", c.Name)
 	fmt.Printf("PV : %d / %d\n", c.CurrentHP, c.MaxHP)
+	updateQuests(c, "drink", 1)
 }
 
 // poisonPot consomme une Eau Croupie : inflige 10 dégâts par seconde pendant 3 secondes.

@@ -25,6 +25,7 @@ type Character struct {
 	ExperienceMax int
 	Mana          int
 	MaxMana       int
+	QuestProgress map[string]int
 }
 
 // Monster représente une entité errante des Backrooms affrontée en combat.

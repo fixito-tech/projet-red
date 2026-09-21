@@ -40,6 +40,7 @@ func buyItem(c *Character, itemName string) {
 	}
 	c.Gold -= info.Price
 	fmt.Printf("Vous obtenez %s.\n", itemName)
+	updateQuests(c, "buy", 1)
 }
 
 // accessBricoleur affiche le menu du Bricoleur (le forgeron des Backrooms) et gère la fabrication.
@@ -98,4 +99,5 @@ func craftEquipment(c *Character, itemName string) {
 	c.Gold -= info.Cost
 	addInventory(c, itemName)
 	fmt.Printf("%s fabrique %s !\n", c.Name, itemName)
+	updateQuests(c, "craft", 1)
 }
