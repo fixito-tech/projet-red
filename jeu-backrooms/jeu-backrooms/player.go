@@ -2,7 +2,7 @@ package main
 
 // ---------------------------------------------------------------
 // PERSONNAGE — données uniquement, aucun affichage ici.
-//
+//lklfj
 // Ce fichier suit la struct Character de l'énoncé. Si la struct du back
 // (tes collègues) porte d'autres noms de champs, c'est UNIQUEMENT ici qu'il
 // faut adapter : l'interface (ui.go) ne lit que ces champs-là.
