@@ -7,13 +7,56 @@ la correspondance tâche par tâche avec l'énoncé.
 
 ## Lancer
 
+Le code, les images et les scripts sont dans `src/` : on lance le jeu
+**depuis ce dossier**, sinon il ne trouve pas ses images.
+
 ```bash
+cd src
 go mod tidy
 go run .
 ```
 
-`go test .` fait tourner toute la suite de tests (voir la section
-« Tests » plus bas).
+La validation se fait à la main : voir
+[docs/CHECKLIST_MANUELLE.md](docs/CHECKLIST_MANUELLE.md).
+
+## Organisation du code
+
+Tous les fichiers sont dans `src/`, dans le même `package main`. Chaque
+écran a un fichier pour le clavier (`*_input.go`) et un pour le dessin
+(`*_ui.go`) ; les règles du jeu sont dans des fichiers sans suffixe.
+Le [guide de compréhension](docs/GUIDE.md) détaille chaque fichier et le
+déroulement d'une partie.
+
+```
+src/
+├── main.go                      point d'entrée : lance le jeu
+├── game.go                      struct Game, Update / Draw, messages temporaires
+├── config.go                    réglages chiffrés (taille des cases, vitesse…)
+├── input.go                     touches des menus (flèches, Entrée…)
+│
+├── player.go                    struct Character, création, XP, mort
+├── inventory.go                 inventaire : ajouter, retirer, utiliser
+├── equipment.go                 struct Equipment (tête, torse, pieds)
+├── spells.go                    sorts appris / verrouillés
+├── economy.go                   marchand et forgeron (prix, recettes)
+├── combat.go                    règles du combat au tour par tour
+├── monster.go                   struct Monster, apparition, IA, loot
+├── boss.go                      boss et son aura
+├── scene.go                     salles : chargement, murs, portes
+├── world.go                     le monde qui vit pendant l'exploration
+├── errors.go                    messages d'erreur personnalisés
+│
+├── menu_input.go / menu_ui.go         menu titre, création du personnage
+├── play_input.go / play_ui.go         exploration des salles
+├── inventory_ui.go                    panneau d'inventaire et icônes
+├── economy_input.go / economy_ui.go   marchand et forgeron
+├── combat_input.go / combat_ui.go     écran de combat, boss, victoire
+├── monster_draw.go                    monstres et loot à l'écran
+├── ui.go                              outils de dessin, HUD, toast
+├── placeholders.go                    visuels de secours si un PNG manque
+│
+└── assets/                      images et grilles des salles
+```
 
 ## Commandes
 
@@ -31,7 +74,7 @@ go run .
 
 ## Ajouter une scène
 
-Chaque scène = 2 fichiers dans `assets/scenes/` :
+Chaque scène = 2 fichiers dans `src/assets/scenes/` :
 - `nom.png` : le décor (800x480)
 - `nom.txt` : la grille de collisions 25x15 + les sorties
 
@@ -50,12 +93,15 @@ Tous les visuels sont générés par des scripts Python (reproductibles),
 **avec un visuel de secours dessiné directement dans le code Go si le
 fichier PNG est absent** — le jeu tourne donc même sans Pillow.
 
+Les scripts sont dans `src/` et **se lancent depuis ce dossier** : ils
+écrivent dans `assets/`, un chemin relatif à `src/`.
+
 | Script | Fichiers produits | Secours Go si absent |
 |---|---|---|
-| `python3 make_player.py` | `assets/player.png` (personnage) | `placeholderSheet` (main.go) |
-| `python3 make_monsters.py` | `assets/monster.png`, `assets/boss.png`, `assets/merchant.png`, `assets/blacksmith.png` | `placeholderMonsterSheet`, `placeholderNPCSheet` (monster_draw.go, economy_ui.go) |
+| `python3 make_player.py` | `assets/player.png` (personnage) | `placeholderSheet` (placeholders.go) |
+| `python3 make_monsters.py` | `assets/monster.png`, `assets/boss.png`, `assets/merchant.png`, `assets/blacksmith.png` | `placeholderMonsterSheet`, `placeholderNPCSheet` (placeholders.go) |
 
-Un fond de menu optionnel peut être mis dans `assets/menu.png`.
+Un fond de menu optionnel peut être mis dans `src/assets/menu.png`.
 
 > Ces deux scripts nécessitent Python 3 + Pillow (`pip install
 > pillow`) ; ils n'ont pas pu être exécutés dans cet environnement de
@@ -76,7 +122,7 @@ empreinte au sol reste d'une case (les collisions ne changent pas).
 - La fenêtre s'ouvre en 1600x960 (jeu interne en 800x480, x2).
 - **F11** ou **Alt+Entrée** : plein écran / fenêtre.
 - Pour démarrer directement en plein écran : `startFullscreen = true`
-  en haut de `main.go`.
+  dans `config.go`.
 
 ## Personnage et inventaire
 
@@ -102,7 +148,7 @@ la salle de départ avec 50 % des PV max (pas d'écran de game over).
 
 ## Monstres — le « monstre spaghetti »
 
-Jusqu'à **6 monstres** vivent sur toute la carte, apparus loin des
+Jusqu'à **9 monstres** vivent sur toute la carte, apparus loin des
 portes et de la salle de départ (jamais dans la salle de départ ni
 celle du boss). Un monstre erre au repos ; si le joueur entre dans son
 rayon de détection, il le poursuit (plus lentement que lui : on peut
@@ -110,7 +156,7 @@ toujours fuir) et affiche un **!** au-dessus de sa tête. Le combat se
 déclenche au contact ; un court délai de grâce suit chaque combat et
 chaque changement de salle pour éviter un re-déclenchement immédiat.
 Quand un monstre meurt, un autre réapparaît progressivement après un
-délai (tant qu'on reste sous 6).
+délai (tant qu'on reste sous 9).
 
 À sa mort, un monstre lâche entre 0 et 3 types d'objets différents
 (jamais plus), à ramasser en marchant dessus.
@@ -123,19 +169,21 @@ texte avec menu **Attaque / Sac / Fuite** (fuite impossible contre le
 boss). Les coups qui portent déclenchent un flash et une secousse
 d'écran.
 
-Trois attaques :
+Quatre attaques :
 | Attaque | Coût | Dégâts | Débloquée |
 |---|---|---|---|
 | Coup de poing | gratuit | 8–14 | dès le départ |
 | Griffe électrique | 15 énergie | 14–20 | dès le départ |
 | Boule de feu | 25 énergie | 22–30 | après achat du grimoire chez le marchand |
+| Souvenir d'Almond Water | 20 énergie | soigne 30 PV (refusé si PV pleins) | après achat du grimoire chez le marchand (60 po) |
 
 L'énergie remonte de 12 à chaque tour de combat, et d'1 point toutes
 les ~40 images hors combat. La **potion de poison** (achetée chez le
 marchand, utilisable depuis le Sac en combat) inflige des dégâts sur 4
 tours au monstre. Les monstres normaux ont un motif d'attaque : leurs
-dégâts doublent tous les 3 tours. La vie d'un monstre normal vaut 2x
-les PV max de base du joueur (hors bonus d'équipement).
+dégâts doublent tous les 3 tours. La vie d'un monstre normal vaut 1x
+les PV max de base du joueur, hors bonus d'équipement (équilibrage
+assumé : l'énoncé prévoit 2x, voir « Divergences signalées »).
 
 **Mission bonus « initiative »** : chaque classe et chaque monstre a
 une vitesse ; le plus rapide agit en premier dans le tour.
@@ -144,8 +192,8 @@ une vitesse ; le plus rapide agit en premier dans le tour.
 
 - **Pièces** : monnaie séparée de l'inventaire, affichée dans le HUD.
 - **Marchand** (au point de départ) : achète le loot ramassé sur les
-  monstres, vend Almond Water, potion de poison et le grimoire
-  « Boule de feu ». Touche **R** pour lui parler, **Tab** pour
+  monstres, vend Almond Water, potion de poison et les grimoires
+  « Boule de feu » et « Souvenir d'Almond Water ». Touche **R** pour lui parler, **Tab** pour
   basculer Acheter/Vendre.
 - **Forgeron** (dans une salle aléatoire de la carte) : fabrique une
   pièce d'équipement par recette (matériaux + pièces), qui s'équipe
@@ -176,39 +224,33 @@ cette aura de 20, jusqu'à l'annuler complètement à trois pièces. Ce
 n'est donc pas un simple indicateur « invincible » : c'est un calcul
 de dégâts qui rend toute stratégie (potions, attaques) insuffisante
 tant qu'on n'a pas au moins un peu d'équipement, et qui devient
-gagnable une fois complètement équipé (voir la preuve simulée dans
-`combat_test.go` : `TestBossUnbeatableWithoutEquipment` et
-`TestBossBeatableWithFullEquipment`, pour les trois classes). Sa
-défaite affiche un écran de victoire.
+gagnable une fois complètement équipé (scénario S11 de la
+[checklist de vérification](docs/CHECKLIST_MANUELLE.md)). Sa défaite
+affiche un écran de victoire.
 
 ## Brancher le back
 
 Toutes les données du personnage sont dans `player.go`. Si la struct
 de l'équipe s'appelle autrement, c'est le seul fichier à adapter :
-`ui.go` ne fait qu'afficher ce qu'il y trouve. `UseItem` est l'endroit
+les fichiers `*_ui.go` ne font qu'afficher ce qu'ils y trouvent. `UseItem`
+(`inventory.go`) est l'endroit
 où brancher `takePot` et les autres effets d'objets hors combat ;
 `combat.go` (`Attack`, `UseBagItem`) fait de même pendant un combat.
 
-## Tests
+## Vérification
 
-`go test .` (voir aussi [docs/TABLEAU_TACHES.md](docs/TABLEAU_TACHES.md)
-pour le détail tâche par tâche) :
-- Personnage : format du nom, stats des classes, argent de départ,
-  mort/résurrection, expérience/niveaux.
-- Inventaire : limite de 10 objets, 3 améliorations max, soin de
-  l'Almond Water.
-- Équipement : bonus de PV max, échange avec l'ancien objet.
-- Sorts : Boule de feu verrouillée tant qu'elle n'est pas achetée.
-- Économie : erreurs personnalisées (pièces, inventaire, matériaux,
-  sort déjà connu), vente du loot, fabrication chez le forgeron.
-- Monstres : formule de vie, loot à 3 types maximum, apparition loin
-  des portes/du départ, IA de poursuite.
-- Combat : attaque gratuite, motif de dégâts doublés tous les 3 tours,
-  poison, fuite (bloquée contre le boss).
-- **Boss** : simulation prouvant qu'il est imbattable sans équipement
-  et battable une fois équipé, pour les 3 classes.
-- Scènes/transitions : chargement des sorties, collisions, position
-  d'entrée dans la salle suivante, chargement de toute la carte 5x5.
+Le projet n'embarque **pas de tests automatisés** : la validation se
+fait à la main, à partir de la
+[checklist de vérification manuelle](docs/CHECKLIST_MANUELLE.md).
+
+Elle couvre 12 scénarios (création du personnage, déplacements,
+inventaire, marchand, monstres, combat, poison, loot, forgeron, mort,
+boss, niveaux) avec les textes attendus mot pour mot. Elle sert aussi
+de référence avant/après chaque refactoring : toute différence
+d'affichage est une régression.
+
+Le détail tâche par tâche se trouve dans
+[docs/TABLEAU_TACHES.md](docs/TABLEAU_TACHES.md).
 
 ## Divergences signalées
 
@@ -216,5 +258,13 @@ Le PDF de l'énoncé n'était pas joint à cette implémentation ; tout a
 été construit à partir de la description détaillée transmise en
 consigne. Voir [docs/TABLEAU_TACHES.md](docs/TABLEAU_TACHES.md#divergences-connues-à-vérifier-contre-le-pdf)
 pour la liste des points (arborescence `/src` + `/docs`, numérotation
-précise 1 à 22, valeurs chiffrées) à revérifier contre le vrai PDF
-avant la remise.
+précise 1 à 22) à revérifier contre le vrai PDF avant la remise.
+
+**Équilibrage assumé, divergent de l'énoncé** (décision d'équipe après
+playtest, constantes en haut de `monster.go`) :
+
+| Règle de l'énoncé | Valeur retenue | Raison |
+|---|---|---|
+| 6 monstres maximum sur la carte | **9** (`MonsterMaxAlive`) | carte de 25 salles : à 6, on croise trop rarement un monstre |
+| Vie du monstre = 2x les PV max du joueur | **1x** (`MonsterHPMultiplier`) | combats plus courts et plus nerveux ; le boss reste à 2x cette valeur |
+| — | vitesse monstre 70 % du joueur (`MonsterSpeedFactor`) | la fuite reste possible mais demande de ne pas hésiter |
